@@ -21,6 +21,7 @@ export default function RootLayout() {
         <Stack.Screen name="signup" options={{ headerShown: false }} />
         <Stack.Screen name="verify-email" options={{ headerShown: false }} />
         <Stack.Screen name="tracker" options={{ headerShown: false }} />
+        <Stack.Screen name="add-category" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>
