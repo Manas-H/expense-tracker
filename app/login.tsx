@@ -1,4 +1,4 @@
-import { auth, db } from "@/firebaseConfig";
+import { auth, db, firebaseReady } from "@/firebaseConfig";
 import { Link, useRouter } from "expo-router";
 import { GoogleAuthProvider, sendPasswordResetEmail, signInWithEmailAndPassword, signInWithPopup } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
@@ -29,7 +29,7 @@ export default function LoginScreen() {
   const [secure, setSecure] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  
+
   // forgot password modal state
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
@@ -78,6 +78,7 @@ export default function LoginScreen() {
 
     try {
       console.log("🔐 Login attempt with email:", email);
+      await firebaseReady;
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
@@ -90,7 +91,7 @@ export default function LoginScreen() {
         setLoading(false);
         const errorMsg = "Email not verified. Please verify your email to login.";
         setError(errorMsg);
-        
+
         Alert.alert(
           "Email Not Verified",
           "Please verify your email before logging in. You'll be redirected to verify your email.",
@@ -121,7 +122,7 @@ export default function LoginScreen() {
       console.error("❌ Login error:", err);
       const errorCode = err.code;
       let errorMessage = "Login failed";
-      
+
       if (errorCode === "auth/user-not-found") {
         errorMessage = "No account found with this email";
       } else if (errorCode === "auth/wrong-password") {
@@ -131,7 +132,7 @@ export default function LoginScreen() {
       } else {
         errorMessage = err.message || "An unexpected error occurred";
       }
-      
+
       console.log("Error message:", errorMessage);
       setError(errorMessage);
       Alert.alert("Login Error", errorMessage);
@@ -170,7 +171,7 @@ export default function LoginScreen() {
         // Get user from Firestore by email (we need to find uid first)
         // For now, we'll check if email is verified in the user's document
         // This requires getting the user's UID - we'll need to search or handle differently
-        
+
         // Send password reset email - Firebase will check if user exists
         await sendPasswordResetEmail(auth, forgotEmail);
 
@@ -260,7 +261,7 @@ export default function LoginScreen() {
         "A new verification email has been sent to your email address. Please check your inbox and click the verification link to verify your email.",
         [{ text: "OK" }]
       );
-      
+
       setShowResendOption(false);
     } catch (err: any) {
       Alert.alert("Error", "Failed to resend verification email");
@@ -357,7 +358,7 @@ export default function LoginScreen() {
           </View>
 
           {/* forgot password */}
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.forgot}
             onPress={() => setShowForgotModal(true)}
           >
@@ -431,7 +432,7 @@ export default function LoginScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Reset Password</Text>
-            
+
             <Text style={styles.modalDescription}>
               Enter your email and we'll send you a link to reset your password. The link expires in 1 hour.
             </Text>

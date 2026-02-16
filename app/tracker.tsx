@@ -1,6 +1,8 @@
 import { auth, db } from "@/firebaseConfig";
+import { Picker } from "@react-native-picker/picker";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
+
 import {
   addDoc,
   collection,
@@ -49,6 +51,10 @@ export default function TrackerScreen() {
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
   const [desktopMenuAnim] = useState(new Animated.Value(0));
 
+  const [timeFilter, setTimeFilter] = useState<
+    "today" | "week" | "month" | "3months" | "6months" | "year"
+  >("today");
+
   // Categories state
   interface Category {
     id: string;
@@ -88,6 +94,38 @@ export default function TrackerScreen() {
   const isMobileWeb = Platform.OS === "web" && width < 768;
   const showFloatingButton =
     Platform.OS === "ios" || Platform.OS === "android" || isMobileWeb;
+
+  const getStartDate = () => {
+    const now = new Date();
+    const start = new Date();
+
+    switch (timeFilter) {
+      case "today":
+        start.setHours(0, 0, 0, 0);
+        break;
+      case "week":
+        start.setDate(now.getDate() - 7);
+        break;
+      case "month":
+        start.setMonth(now.getMonth() - 1);
+        break;
+      case "3months":
+        start.setMonth(now.getMonth() - 3);
+        break;
+      case "6months":
+        start.setMonth(now.getMonth() - 6);
+        break;
+      case "year":
+        start.setFullYear(now.getFullYear() - 1);
+        break;
+    }
+
+    return start.getTime();
+  };
+
+  const totalSpent = expenses
+    .filter((expense) => expense.timestamp >= getStartDate())
+    .reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
 
   useEffect(() => {
     // Check if user is authenticated
@@ -304,29 +342,68 @@ export default function TrackerScreen() {
     }
   };
 
-  const handleDeleteExpense = (expenseId: string) => {
-    Alert.alert("Delete Expense?", "Are you sure you want to delete this expense?", [
-      { text: "Cancel", onPress: () => {}, style: "cancel" },
-      {
-        text: "Delete",
-        onPress: async () => {
-          if (!user) return;
-          setDeletingExpenseId(expenseId);
-          try {
-            const expenseRef = doc(db, `users/${user.uid}/expenses`, expenseId);
-            await deleteDoc(expenseRef);
-            Alert.alert("Success", "Expense deleted successfully!");
-          } catch (error) {
-            console.error("Error deleting expense:", error);
-            Alert.alert("Error", "Failed to delete expense");
-          } finally {
-            setDeletingExpenseId(null);
-          }
-        },
-        style: "destructive",
-      },
-    ]);
+  const deleteExpense = async (expenseId: string) => {
+    if (!user) return;
+
+    setDeletingExpenseId(expenseId);
+
+    try {
+      const expenseRef = doc(
+        db,
+        `users/${user.uid}/expenses`,
+        expenseId
+      );
+
+      await deleteDoc(expenseRef);
+
+      if (Platform.OS === "web") {
+        window.alert("Expense deleted successfully!");
+      } else {
+        Alert.alert("Success", "Expense deleted successfully!");
+      }
+
+    } catch (error) {
+      console.error("Error deleting expense:", error);
+
+      if (Platform.OS === "web") {
+        window.alert("Failed to delete expense");
+      } else {
+        Alert.alert("Error", "Failed to delete expense");
+      }
+
+    } finally {
+      setDeletingExpenseId(null);
+    }
   };
+
+  const handleDeleteExpense = (expenseId: string) => {
+    // console.log("Attempting to delete expense with ID:", expenseId);
+
+    if (Platform.OS === "web") {
+      const confirmed = window.confirm(
+        "Are you sure you want to delete this expense?"
+      );
+
+      if (!confirmed) return;
+
+      deleteExpense(expenseId);
+
+    } else {
+      Alert.alert(
+        "Delete Expense?",
+        "Are you sure you want to delete this expense?",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => deleteExpense(expenseId),
+          },
+        ]
+      );
+    }
+  };
+
 
   const toggleMenu = () => {
     if (Platform.OS === "web" && !isMobileWeb) {
@@ -567,9 +644,35 @@ export default function TrackerScreen() {
 
           {/* Recent Activity / Expenses */}
           <View style={styles.activitySection}>
-            <Text style={styles.sectionTitle}>
-              Expenses {expenses.length > 0 && `(${expenses.length})`}
-            </Text>
+            <View style={styles.expensesHeader}>
+              <Text style={styles.sectionTitle}>
+                Expenses {expenses.length > 0 && `(${expenses.length})`}
+              </Text>
+
+              <View style={styles.totalContainer}>
+                <View style={styles.totalBox}>
+                  <Text style={styles.totalLabel}>Total Spent :</Text>
+                  <Text style={styles.totalAmount}>
+                    {getCurrencySymbol()}{totalSpent.toFixed(2)}
+                  </Text>
+                </View>
+
+                <Picker
+                  selectedValue={timeFilter}
+                  style={styles.timePicker}
+                  onValueChange={(itemValue) => setTimeFilter(itemValue)}
+                >
+                  <Picker.Item label="Today" value="today" />
+                  <Picker.Item label="Last 7 Days" value="week" />
+                  <Picker.Item label="1 Month" value="month" />
+                  <Picker.Item label="3 Months" value="3months" />
+                  <Picker.Item label="6 Months" value="6months" />
+                  <Picker.Item label="1 Year" value="year" />
+                </Picker>
+              </View>
+            </View>
+
+
             {loadingExpenses ? (
               <View style={styles.emptyState}>
                 <ActivityIndicator size="large" color="#8B5CF6" />
@@ -2124,6 +2227,49 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: TEXT,
   },
+
+  expensesHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    flexWrap: "wrap",
+    gap: 16,
+    marginBottom: 16,
+  },
+
+  totalContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    flexWrap: "wrap",
+  },
+
+  totalBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    flexWrap: "wrap",
+
+  },
+
+
+  totalLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: TEXT,
+  },
+
+  totalAmount: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#10B981",
+  },
+
+  timePicker: {
+    minWidth: 140,
+    height: 40,
+  },
+
 
 });
 

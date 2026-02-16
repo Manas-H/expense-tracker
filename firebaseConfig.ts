@@ -1,8 +1,8 @@
 import { initializeApp } from "firebase/app";
 import {
-    browserLocalPersistence,
-    getAuth,
-    setPersistence,
+  browserLocalPersistence,
+  getAuth,
+  setPersistence,
 } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { Platform } from "react-native";
@@ -36,15 +36,19 @@ const app = initializeApp(firebaseConfig);
 // Get Auth instance
 const auth = getAuth(app);
 
-// Set persistence for web
+// 🔥 Ensure persistence is set BEFORE auth is used
+let firebaseReady: Promise<void> = Promise.resolve();
+
 if (Platform.OS === "web") {
-  setPersistence(auth, browserLocalPersistence).catch((error) => {
-    console.warn("Failed to set persistence:", error);
-  });
+  firebaseReady = setPersistence(auth, browserLocalPersistence).catch(
+    (error) => {
+      console.warn("Failed to set persistence:", error);
+    },
+  );
 }
 
 // Get Firestore instance
 const db = getFirestore(app);
 
-export { app, auth, db };
+export { app, auth, db, firebaseReady };
 

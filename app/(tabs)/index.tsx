@@ -67,7 +67,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={[styles.container, isLargeScreen && styles.containerLarge]}>
-        
+
         {/* Decorative gradient blobs */}
         <View style={styles.gradientBlob1} />
         <View style={styles.gradientBlob2} />
@@ -310,16 +310,17 @@ const styles = StyleSheet.create({
   appName: {
     fontSize: 40,
     fontWeight: "800",
-    color: TEXT_PRIMARY,
+    color: "white",
     letterSpacing: -0.5,
     textAlign: "center",
     ...Platform.select({
       web: {
-        background: `linear-gradient(135deg, ${PRIMARY_LIGHT} 0%, ${SECONDARY_COLOR} 100%)`,
+        backgroundImage: `linear-gradient(135deg, ${PRIMARY_LIGHT} 0%, ${SECONDARY_COLOR} 100%)`,
         WebkitBackgroundClip: "text",
         WebkitTextFillColor: "transparent",
       },
     }),
+
   },
 
   appNameLarge: {
