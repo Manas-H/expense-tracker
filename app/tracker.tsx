@@ -1,5 +1,4 @@
 import { auth, db } from "@/firebaseConfig";
-import { Picker } from "@react-native-picker/picker";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 
@@ -8,12 +7,14 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   onSnapshot,
   orderBy,
   query,
+  setDoc,
   updateDoc,
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -51,9 +52,30 @@ export default function TrackerScreen() {
   const [desktopMenuOpen, setDesktopMenuOpen] = useState(false);
   const [desktopMenuAnim] = useState(new Animated.Value(0));
 
-  const [timeFilter, setTimeFilter] = useState<
-    "today" | "week" | "month" | "3months" | "6months" | "year"
-  >("today");
+  type TimeFilter =
+    | "today"
+    | "week"
+    | "month"
+    | "3months"
+    | "6months"
+    | "year";
+
+  const [timeFilter, setTimeFilter] = useState<TimeFilter>("today");
+
+
+  const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
+
+  const timeOptions: { label: string; value: TimeFilter }[] = [
+    { label: "Today", value: "today" },
+    { label: "Last 7 Days", value: "week" },
+    { label: "1 Month", value: "month" },
+    { label: "3 Months", value: "3months" },
+    { label: "6 Months", value: "6months" },
+    { label: "1 Year", value: "year" },
+  ];
+
+  const selectedLabel =
+    timeOptions.find((opt) => opt.value === timeFilter)?.label || "Today";
 
   // Categories state
   interface Category {
@@ -88,7 +110,24 @@ export default function TrackerScreen() {
   const [updatingExpense, setUpdatingExpense] = useState(false);
   const [deletingExpenseId, setDeletingExpenseId] = useState<string | null>(null);
   const [slideEditAnim] = useState(new Animated.Value(0));
+  const filterButtonRef = useRef<View | null>(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
+  const [budgetModalVisible, setBudgetModalVisible] = useState(false);
+  const [monthlyBudget, setMonthlyBudget] = useState<number>(0);
+  const [budgetInput, setBudgetInput] = useState("");
+  const [savingBudget, setSavingBudget] = useState(false);
 
+  const EXCHANGE_RATE = 83
+
+  const formatAmount = (amount: string) => {
+    const value = parseFloat(amount) || 0;
+
+    if (currency === "USD") {
+      return (value / EXCHANGE_RATE).toFixed(2);
+    }
+
+    return value.toFixed(2);
+  };
 
   // Determine if should show floating button (mobile or small web)
   const isMobileWeb = Platform.OS === "web" && width < 768;
@@ -200,6 +239,30 @@ export default function TrackerScreen() {
 
     return () => unsubscribe();
   }, [user]);
+
+  // Fetch monthly budget
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchBudget = async () => {
+      try {
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+
+          if (data.monthlyBudget) {
+            setMonthlyBudget(data.monthlyBudget);
+          }
+        }
+      } catch (error) {
+        console.log("Error fetching budget:", error);
+      }
+    };
+
+    fetchBudget();
+  }, [user]);
+
 
   useEffect(() => {
     // Start continuous floating animation for mobile menu button
@@ -404,6 +467,38 @@ export default function TrackerScreen() {
     }
   };
 
+  const handleSaveBudget = async () => {
+    if (!budgetInput || !user) return;
+
+    try {
+      setSavingBudget(true);
+
+      const value = parseFloat(budgetInput);
+
+      await setDoc(
+        doc(db, "users", user.uid),
+        {
+          monthlyBudget: value,
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      );
+
+      setMonthlyBudget(value);
+      setBudgetModalVisible(false);
+      setBudgetInput("");
+
+      Alert.alert("Success", "Budget saved successfully!");
+    } catch (error) {
+      console.log("Error saving budget:", error);
+      Alert.alert("Error", "Failed to save budget");
+    } finally {
+      setSavingBudget(false);
+    }
+  };
+
+
+
 
   const toggleMenu = () => {
     if (Platform.OS === "web" && !isMobileWeb) {
@@ -452,7 +547,7 @@ export default function TrackerScreen() {
     } else if (action === "category") {
       router.push("/add-category");
     } else if (action === "analytics") {
-      // TODO: Navigate to analytics
+      router.push("/analytics");
     } else if (action === "budget") {
       // TODO: Navigate to budget
     } else if (action === "profile") {
@@ -503,6 +598,23 @@ export default function TrackerScreen() {
     setCurrency(newCurrency);
     setShowCurrencyMenu(false);
   };
+
+
+  const getStartOfMonth = () => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  };
+
+  const monthlyTotal = expenses
+    .filter((expense) => expense.timestamp >= getStartOfMonth())
+    .reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
+
+  const budgetLeft = monthlyBudget - monthlyTotal;
+
+  const formattedBudgetLeft =
+    currency === "USD"
+      ? (budgetLeft / EXCHANGE_RATE).toFixed(2)
+      : budgetLeft.toFixed(2);
 
   if (loading) {
     return (
@@ -602,15 +714,32 @@ export default function TrackerScreen() {
           <View style={styles.statsContainer}>
             <View style={[styles.statCard, styles.statCard1]}>
               <Text style={styles.statLabel}>Total Expenses</Text>
-              <Text style={styles.statValue}>{getCurrencySymbol()}0.00</Text>
-              <Text style={styles.statDetail}>This month</Text>
+              <Text style={styles.statValue}>
+                {getCurrencySymbol()}
+                {formatAmount(monthlyTotal.toString())}
+              </Text>
+              <Text style={styles.statDetail}>This Month</Text>
+
             </View>
 
             <View style={[styles.statCard, styles.statCard2]}>
               <Text style={styles.statLabel}>Budget Left</Text>
-              <Text style={styles.statValue}>{getCurrencySymbol()}0,000</Text>
-              <Text style={styles.statDetail}>Available</Text>
+
+              <Text
+                style={[
+                  styles.statValue,
+                  budgetLeft < 0 && { color: "#EF4444" }, // red if over budget
+                ]}
+              >
+                {getCurrencySymbol()}
+                {formattedBudgetLeft}
+              </Text>
+
+              <Text style={styles.statDetail}>
+                {budgetLeft < 0 ? "Over Budget" : "Available"}
+              </Text>
             </View>
+
           </View>
 
           {/* Quick Actions */}
@@ -625,21 +754,38 @@ export default function TrackerScreen() {
               </View>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.actionButton}>
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => router.push("/analytics")}
+            >
               <Text style={styles.actionIcon}>📊</Text>
+
               <View style={styles.actionContent}>
                 <Text style={styles.actionTitle}>View Analytics</Text>
                 <Text style={styles.actionDesc}>See spending breakdown</Text>
               </View>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.actionButton}>
+
+            <TouchableOpacity
+              style={styles.actionButton}
+              onPress={() => setBudgetModalVisible(true)}
+            >
               <Text style={styles.actionIcon}>💰</Text>
+
               <View style={styles.actionContent}>
-                <Text style={styles.actionTitle}>Set Budget</Text>
-                <Text style={styles.actionDesc}>Manage your budget</Text>
+                <Text style={styles.actionTitle}>
+                  {monthlyBudget > 0 ? "Edit Budget" : "Set Budget"}
+                </Text>
+
+                <Text style={styles.actionDesc}>
+                  {monthlyBudget > 0
+                    ? `Current: ${getCurrencySymbol()}${monthlyBudget.toFixed(2)}`
+                    : "Manage your monthly budget"}
+                </Text>
               </View>
             </TouchableOpacity>
+
           </View>
 
           {/* Recent Activity / Expenses */}
@@ -653,22 +799,37 @@ export default function TrackerScreen() {
                 <View style={styles.totalBox}>
                   <Text style={styles.totalLabel}>Total Spent :</Text>
                   <Text style={styles.totalAmount}>
-                    {getCurrencySymbol()}{totalSpent.toFixed(2)}
+                    {getCurrencySymbol()}{formatAmount(totalSpent.toString())}
                   </Text>
                 </View>
+                <View style={styles.timeFilterContainer}>
+                  <TouchableOpacity
+                    ref={filterButtonRef}
+                    style={[
+                      styles.timeFilterButton,
+                      timeDropdownOpen && styles.timeFilterButtonActive,
+                    ]}
+                    onPress={() => {
+                      if (!timeDropdownOpen) {
+                        filterButtonRef.current?.measureInWindow((x, y, width, height) => {
+                          setDropdownPosition({
+                            top: y + height + 6,
+                            right: 20,
+                          });
+                        });
+                      }
+                      setTimeDropdownOpen(!timeDropdownOpen);
+                    }}
+                  >
 
-                <Picker
-                  selectedValue={timeFilter}
-                  style={styles.timePicker}
-                  onValueChange={(itemValue) => setTimeFilter(itemValue)}
-                >
-                  <Picker.Item label="Today" value="today" />
-                  <Picker.Item label="Last 7 Days" value="week" />
-                  <Picker.Item label="1 Month" value="month" />
-                  <Picker.Item label="3 Months" value="3months" />
-                  <Picker.Item label="6 Months" value="6months" />
-                  <Picker.Item label="1 Year" value="year" />
-                </Picker>
+                    <Text style={styles.timeFilterText}>{selectedLabel}</Text>
+                    <Text style={styles.timeFilterArrow}>
+                      {timeDropdownOpen ? "▲" : "▼"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+
               </View>
             </View>
 
@@ -711,7 +872,7 @@ export default function TrackerScreen() {
                       {expense.category}
                     </Text>
                     <Text style={[styles.tableCell, { flex: 0.12, fontWeight: "700", color: "#10B981" }]}>
-                      {getCurrencySymbol()}{expense.amount}
+                      {getCurrencySymbol()}{formatAmount(expense.amount)}
                     </Text>
                     <Text
                       style={[styles.tableCell, { flex: 0.25 }]}
@@ -772,7 +933,7 @@ export default function TrackerScreen() {
                       </View>
                       <View style={styles.expenseCardBody}>
                         <Text style={styles.expenseCardAmount}>
-                          {getCurrencySymbol()}{expense.amount}
+                          {getCurrencySymbol()}{formatAmount(expense.amount)}
                         </Text>
                         {expense.description && (
                           <Text style={styles.expenseCardDescription}>
@@ -803,6 +964,61 @@ export default function TrackerScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Time Filter Dropdown Modal */}
+      <Modal
+        transparent
+        visible={timeDropdownOpen}
+        animationType="fade"
+        onRequestClose={() => setTimeDropdownOpen(false)}
+      >
+        <TouchableOpacity
+          style={{ flex: 1 }}
+          activeOpacity={1}
+          onPress={() => setTimeDropdownOpen(false)}
+        >
+          <View
+            style={{
+              position: "absolute",
+              top: dropdownPosition.top,
+              right: dropdownPosition.right,
+              backgroundColor: CARD,
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: BORDER,
+              minWidth: 180,
+            }}
+          >
+            {timeOptions.map((option, index) => {
+              const isActive = option.value === timeFilter;
+              return (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.timeFilterOption,
+                    isActive && styles.timeFilterOptionActive,
+                    index === timeOptions.length - 1 && { borderBottomWidth: 0 },
+                  ]}
+                  onPress={() => {
+                    setTimeFilter(option.value);
+                    setTimeDropdownOpen(false);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.timeFilterOptionText,
+                      isActive && styles.timeFilterOptionTextActive,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
 
       {/* Desktop Left Slide Menu */}
       {Platform.OS === "web" && !isMobileWeb && desktopMenuOpen && (
@@ -1317,6 +1533,146 @@ export default function TrackerScreen() {
           </View>
         )}
       </Modal>
+
+      <Modal
+        visible={budgetModalVisible}
+        transparent={true}
+        animationType={Platform.OS === "web" ? "fade" : "none"}
+        onRequestClose={() => setBudgetModalVisible(false)}
+      >
+        {Platform.OS === "ios" || Platform.OS === "android" ? (
+          // ✅ Mobile Bottom Sheet
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity
+              style={styles.modalBackdrop}
+              activeOpacity={1}
+              onPress={() => setBudgetModalVisible(false)}
+            />
+
+            <Animated.View style={styles.bottomSheet}>
+              <View style={styles.bottomSheetHandle}>
+                <View style={styles.handle} />
+              </View>
+
+              <Text style={styles.modalTitle}>Set Monthly Budget</Text>
+
+              <KeyboardAvoidingView behavior="padding">
+                <View style={styles.formContainer}>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.label}>Budget Amount</Text>
+
+                    <View style={styles.inputWrapper}>
+                      <Text style={styles.currencySymbol}>
+                        {getCurrencySymbol()}
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        placeholder="0.00"
+                        placeholderTextColor={MUTED}
+                        keyboardType="decimal-pad"
+                        value={budgetInput}
+                        onChangeText={setBudgetInput}
+                        editable={!savingBudget}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.buttonGroup}>
+                    <TouchableOpacity
+                      style={styles.cancelButton}
+                      onPress={() => setBudgetModalVisible(false)}
+                      disabled={savingBudget}
+                    >
+                      <Text style={styles.cancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.submitButton,
+                        savingBudget && styles.buttonDisabled,
+                      ]}
+                      onPress={handleSaveBudget}
+                      disabled={savingBudget}
+                    >
+                      {savingBudget ? (
+                        <ActivityIndicator size="small" color="#FFF" />
+                      ) : (
+                        <Text style={styles.submitButtonText}>Save Budget</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
+            </Animated.View>
+          </View>
+        ) : (
+          // ✅ Desktop Modal
+          <View style={styles.desktopModalOverlay}>
+            <View style={styles.desktopModal}>
+              <View style={styles.desktopModalHeader}>
+                <Text style={styles.modalTitle}>Set Monthly Budget</Text>
+                <TouchableOpacity
+                  onPress={() => setBudgetModalVisible(false)}
+                >
+                  <Text style={styles.closeButton}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <KeyboardAvoidingView behavior="padding">
+                <View style={styles.formContainer}>
+                  <View style={styles.formGroup}>
+                    <Text style={styles.label}>Budget Amount</Text>
+
+                    <View style={styles.inputWrapper}>
+                      <Text style={styles.currencySymbol}>
+                        {getCurrencySymbol()}
+                      </Text>
+
+                      <TextInput
+                        style={styles.input}
+                        placeholder="0.00"
+                        placeholderTextColor={MUTED}
+                        keyboardType="decimal-pad"
+                        value={budgetInput}
+                        onChangeText={setBudgetInput}
+                        editable={!savingBudget}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.buttonGroup}>
+                    <TouchableOpacity
+                      style={styles.cancelButton}
+                      onPress={() => setBudgetModalVisible(false)}
+                      disabled={savingBudget}
+                    >
+                      <Text style={styles.cancelButtonText}>Cancel</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.submitButton,
+                        savingBudget && styles.buttonDisabled,
+                      ]}
+                      onPress={handleSaveBudget}
+                      disabled={savingBudget}
+                    >
+                      {savingBudget ? (
+                        <ActivityIndicator size="small" color="#FFF" />
+                      ) : (
+                        <Text style={styles.submitButtonText}>Save Budget</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
+            </View>
+          </View>
+        )}
+      </Modal>
+
+
 
       {/* Floating Action Button for Mobile & Small Web */}
       {showFloatingButton && (
@@ -2081,7 +2437,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: BORDER,
-    overflow: "hidden",
+    overflow: "visible",
+    // zIndex: -1,
   },
 
   tableHeaderRow: {
@@ -2264,12 +2621,129 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#10B981",
   },
-
-  timePicker: {
-    minWidth: 140,
-    height: 40,
+  timeFilterContainer: {
+    position: "relative",
+    minWidth: 160,
+    // zIndex: 9999,
+    // elevation: 50,
   },
 
+
+  timeFilterButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+
+  timeFilterButtonActive: {
+    borderColor: PRIMARY,
+    shadowColor: PRIMARY,
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+
+  timeFilterText: {
+    color: TEXT,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  timeFilterArrow: {
+    color: PRIMARY,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+
+  timeFilterDropdown: {
+    position: "absolute",
+    top: 55,
+    right: 0,
+    backgroundColor: CARD,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: BORDER,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 50,     // Android
+    zIndex: 9999,      // iOS
+    minWidth: 180,
+  },
+
+
+  timeFilterOption: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+  },
+
+  timeFilterOptionActive: {
+    backgroundColor: "rgba(139, 92, 246, 0.15)",
+  },
+
+  timeFilterOptionText: {
+    color: MUTED,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  timeFilterOptionTextActive: {
+    color: PRIMARY,
+    fontWeight: "700",
+  },
+
+  setBudgetButton: {
+    marginTop: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    backgroundColor: "#8B5CF6",
+    borderRadius: 12,
+    alignSelf: "flex-start",
+  },
+
+  setBudgetButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 14,
+  },
+
+  modalContainer: {
+    width: "90%",
+    maxWidth: 400,
+    backgroundColor: "#1F2937",
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#374151",
+  },
+
+
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+
+  saveButton: {
+    backgroundColor: "#8B5CF6",
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+  },
+
+  saveButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+  },
 
 });
 
